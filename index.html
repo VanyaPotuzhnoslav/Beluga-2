@@ -171,6 +171,12 @@
         const buyStmBtn = document.getElementById('buy-stm-btn');
         const endTurnBtn = document.getElementById('end-turn-btn');
         const logElement = document.getElementById('log');
+        const TERRAIN_TYPES = {
+    PLAIN: { name: "Рівнина", moveCost: 1, rangeBonus: 0, damageMultiplier: 1.0 },
+    FOREST: { name: "Ліс", moveCost: 1, rangeBonus: 0, damageMultiplier: 0.7 }, // Укриття
+    MOUNTAIN: { name: "Гори", moveCost: 2, rangeBonus: 1, damageMultiplier: 1.0 }, // Потребує 2 швидкості, +1 дальність
+    TRENCH: { name: "Окопи", moveCost: 1, rangeBonus: 0, damageMultiplier: 0.6 }  // Гарне укриття
+};
 
         let playerGold = 2; // Дамо трохи більше на старт для тесту штурмовика
         let enemyGold = 2;
@@ -212,6 +218,41 @@
             }
             updateVisuals();
         }
+        function canMoveToTile(unit, targetTile) {
+    const terrain = TERRAIN_TYPES[targetTile.type] || TERRAIN_TYPES.PLAIN;
+    
+    // Перевіряємо, чи вистачає у юніта залишившихся очок руху (speed)
+    if (unit.currentSpeed >= terrain.moveCost) {
+        return true;
+    }
+    
+    return false;
+}
+
+function moveUnit(unit, targetTile) {
+    if (!canMoveToTile(unit, targetTile)) return false;
+    
+    const terrain = TERRAIN_TYPES[targetTile.type] || TERRAIN_TYPES.PLAIN;
+    
+    // Віднімаємо швидкість (наприклад, 2 для гір)
+    unit.currentSpeed -= terrain.moveCost;
+    unit.x = targetTile.x;
+    unit.y = targetTile.y;
+    
+    return true;
+}
+        function calculateDamage(attacker, defender, defenderTile) {
+    const terrain = TERRAIN_TYPES[defenderTile.type] || TERRAIN_TYPES.PLAIN;
+    
+    // Базовий розрахунок шкоди (можеш підставити свою формулу)
+    let finalDamage = attacker.attackPower;
+    
+    // Застосовуємо укриття (ліс зменшить на х0.7, окопи на х0.6)
+    finalDamage = finalDamage * terrain.damageMultiplier;
+    
+    // Округлюємо, щоб не було дробових життів
+    return Math.round(finalDamage);
+}
 
         // Перевірка, чи дозволено гравцеві/ШІ спавнити юніта на цій клітинці
         function isSpawnPointAllowed(x, y, faction) {
