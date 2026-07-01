@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Покрокова Стратегія — Штурмовики та Бази</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+
+        h1 { margin-bottom: 5px; }
+
+        #ui {
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .btn {
+            padding: 10px 15px;
+            font-size: 14px;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 5px;
+        }
+        
+        #end-turn-btn { background-color: #e74c3c; }
+        #end-turn-btn:hover { background-color: #c0392b; }
+        
+        #buy-inf-btn { background-color: #f1c40f; color: #2c3e50; }
+        #buy-inf-btn:hover { background-color: #d35400; }
+        #buy-stm-btn { background-color: #9b59b6; color: white; }
+        #buy-stm-btn:hover { background-color: #8e44ad; }
+        
+        .btn:disabled { background-color: #7f8c8d; color: #bdc3c7; cursor: not-allowed; }
+
+        #log {
+            background-color: #34495e;
+            padding: 10px;
+            border-radius: 5px;
+            width: 500px;
+            min-height: 55px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            border-left: 5px solid #2ecc71;
+            box-sizing: border-box;
+            white-space: pre-line;
+        }
+
+        /* Ігрова сітка */
+        #map {
+            display: grid;
+            grid-template-columns: repeat(8, 60px);
+            grid-template-rows: repeat(8, 60px);
+            gap: 2px;
+            background-color: #34495e;
+            padding: 5px;
+            border-radius: 5px;
+        }
+
+        /* Клітинка мапи */
+        .cell {
+            background-color: #27ae60;
+            border-radius: 3px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            user-select: none;
+            position: relative;
+        }
+
+        .cell:hover { filter: brightness(1.15); }
+
+        .cell.selected {
+            outline: 3px solid #f1c40f;
+            outline-offset: -3px;
+        }
+
+        .cell.highlighted {
+            background-color: #2ecc71;
+            box-shadow: inset 0 0 10px rgba(255,255,255,0.4);
+        }
+
+        /* Підсвічування точок для спавну */
+        .cell.spawn-allowed {
+            outline: 3px dashed #f1c40f;
+            outline-offset: -3px;
+            background-color: #f39c12 !important;
+        }
+
+        /* Об'єкти (Селища) */
+        .village {
+            font-size: 24px;
+            position: absolute;
+            z-index: 1;
+            opacity: 0.5;
+            transition: all 0.3s;
+        }
+        .cell.captured-player { background-color: #2980b9 !important; }
+        .cell.captured-player .village { opacity: 1; filter: drop-shadow(0 0 4px #fff); }
+        
+        .cell.captured-enemy { background-color: #c0392b !important; }
+        .cell.captured-enemy .village { opacity: 1; filter: drop-shadow(0 0 4px #fff); }
+
+        /* Юніти */
+        .unit {
+            width: 44px;
+            height: 44px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            color: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            position: relative;
+            z-index: 10;
+        }
+
+        .unit .name { font-size: 10px; }
+        .unit .hp { font-size: 9px; background: rgba(0,0,0,0.5); padding: 1px 3px; border-radius: 3px; margin-top: 1px; }
+        
+        .unit.player { background-color: #2980b9; }
+        /* Колір штурмовика трохи темніший/насиченіший для розрізнення */
+        .unit.player.stm { background-color: #1f3a60; border-color: #f1c40f; } 
+        
+        .unit.enemy { background-color: #e74c3c; }
+        .unit.enemy.stm { background-color: #78281f; border-color: #f1c40f; }
+        
+        .unit.exhausted { filter: grayscale(80%) brightness(0.7); }
+    </style>
+</head>
+<body>
+
+    <h1>Покрокова стратегія: Штурм</h1>
+    
+    <div id="ui">
+        <div id="status">
+            💰 Твоє Золото: <strong id="gold-display" style="color: #f1c40f;">1</strong> | 
+            🤖 Золото ШІ: <strong id="enemy-gold-display" style="color: #e74c3c;">1</strong>
+        </div>
+        <button id="buy-inf-btn" class="btn">➕ INF (1 💰)</button>
+        <button id="buy-stm-btn" class="btn">⚡ Штурмовик STM (2 💰)</button>
+        <button id="end-turn-btn" class="btn">Завершити хід</button>
+    </div>
+
+    <div id="log">Твій хід! Натисни на юніта для руху або обери війська для найму.</div>
+
+    <div id="map"></div>
+
+    <script>
+        const MAP_SIZE = 8;
+        const mapElement = document.getElementById('map');
+        const goldDisplay = document.getElementById('gold-display');
+        const enemyGoldDisplay = document.getElementById('enemy-gold-display');
+        const buyInfBtn = document.getElementById('buy-inf-btn');
+        const buyStmBtn = document.getElementById('buy-stm-btn');
+        const endTurnBtn = document.getElementById('end-turn-btn');
+        const logElement = document.getElementById('log');
+
+        let playerGold = 2; // Дамо трохи більше на старт для тесту штурмовика
+        let enemyGold = 2;
+        let nextPlayerId = 1;
+        let nextEnemyId = 1;
+        let isPlayerTurn = true;
+
+        // Режим найму (чекає кліку по базі на мапі)
+        let buyMode = null; // може бути 'INF' або 'STM'
+
+        let units = [
+            { id: 'p_' + nextPlayerId++, type: 'player', classType: 'inf', name: 'INF', x: 0, y: 1, mp: 2, maxMp: 2, hp: 10, maxHp: 10, damage: 4 }
+        ];
+
+        let enemies = [
+            { id: 'e_' + nextEnemyId++, type: 'enemy', classType: 'inf', name: 'E-INF', x: 7, y: 6, mp: 2, maxMp: 2, hp: 10, maxHp: 10, damage: 4 }
+        ];
+
+        let villages = [
+            { x: 2, y: 2, owner: 'neutral' },
+            { x: 5, y: 5, owner: 'neutral' },
+            { x: 1, y: 4, owner: 'neutral' },
+            { x: 6, y: 3, owner: 'neutral' }
+        ];
+        
+        let selectedUnit = null;
+
+        function createMap() {
+            mapElement.innerHTML = '';
+            for (let y = 0; y < MAP_SIZE; y++) {
+                for (let x = 0; x < MAP_SIZE; x++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.dataset.x = x;
+                    cell.dataset.y = y;
+                    cell.addEventListener('click', () => handleCellClick(x, y));
+                    mapElement.appendChild(cell);
+                }
+            }
+            updateVisuals();
+        }
+
+        // Перевірка, чи дозволено гравцеві/ШІ спавнити юніта на цій клітинці
+        function isSpawnPointAllowed(x, y, faction) {
+            // Стартові кути дозволені завжди
+            if (faction === 'player' && x === 0 && y === 0) return true;
+            if (faction === 'enemy' && x === 7 && y === 7) return true;
+            
+            // Захоплені селища дозволені
+            const village = villages.find(v => v.x === x && v.y === y);
+            if (village && village.owner === faction) return true;
+
+            return false;
+        }
+
+        function updateVisuals() {
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                cell.innerHTML = '';
+                cell.className = 'cell';
+                
+                const cx = parseInt(cell.dataset.x);
+                const cy = parseInt(cell.dataset.y);
+
+                // 1. Селища
+                const village = villages.find(v => v.x === cx && v.y === cy);
+                if (village) {
+                    if (village.owner === 'player') cell.classList.add('captured-player');
+                    if (village.owner === 'enemy') cell.classList.add('captured-enemy');
+                    
+                    const vDiv = document.createElement('div');
+                    vDiv.classList.add('village');
+                    vDiv.innerText = '🏠';
+                    cell.appendChild(vDiv);
+                }
+
+                // 2. РЕЖИМ НАЙМУ: підсвічуємо доступні точки спавну
+                if (buyMode) {
+                    if (isSpawnPointAllowed(cx, cy, 'player')) {
+                        // Перевіряємо, чи точка вільна від будь-яких живих юнітів
+                        const isOccupied = units.concat(enemies).some(u => u.x === cx && u.y === cy && u.hp > 0);
+                        if (!isOccupied) {
+                            cell.classList.add('spawn-allowed');
+                        }
+                    }
+                }
+
+                // 3. Підсвічування ходів
+                if (!buyMode && isPlayerTurn && selectedUnit && selectedUnit.mp > 0) {
+                    const distance = Math.abs(cx - selectedUnit.x) + Math.abs(cy - selectedUnit.y);
+                    if (distance <= selectedUnit.mp && distance > 0) {
+                        const hasAnyUnit = units.concat(enemies).some(u => u.x === cx && u.y === cy && u.hp > 0);
+                        if (!hasAnyUnit) {
+                            cell.classList.add('highlighted');
+                        }
+                    }
+                }
+
+                // 4. Юніти гравця
+                units.forEach(u => {
+                    if (u.hp > 0 && cx === u.x && cy === u.y) {
+                        const uDiv = createUnitDOM(u);
+                        if (selectedUnit && selectedUnit.id === u.id) cell.classList.add('selected');
+                        cell.appendChild(uDiv);
+                    }
+                });
+
+                // 5. Юніти ШІ
+                enemies.forEach(e => {
+                    if (e.hp > 0 && cx === e.x && cy === e.y) {
+                        const eDiv = createUnitDOM(e);
+                        cell.appendChild(eDiv);
+                    }
+                });
+            });
+
+            goldDisplay.innerText = playerGold;
+            enemyGoldDisplay.innerText = enemyGold;
+            
+            buyInfBtn.disabled = !isPlayerTurn || playerGold < 1 || buyMode !== null;
+            buyStmBtn.disabled = !isPlayerTurn || playerGold < 2 || buyMode !== null;
+            endTurnBtn.disabled = !isPlayerTurn;
+        }
+
+        function createUnitDOM(uData) {
+            const uDiv = document.createElement('div');
+            uDiv.classList.add('unit', uData.type);
+            if (uData.classType === 'stm') uDiv.classList.add('stm');
+            if (uData.type === 'player' && uData.mp === 0 && isPlayerTurn) uDiv.classList.add('exhausted');
+
+            const nameSpan = document.createElement('span');
+            nameSpan.classList.add('name');
+            nameSpan.innerText = uData.name;
+
+            const hpSpan = document.createElement('span');
+            hpSpan.classList.add('hp');
+            hpSpan.innerText = `HP:${uData.hp}`;
+
+            uDiv.appendChild(nameSpan);
+            uDiv.appendChild(hpSpan);
+            return uDiv;
+        }
+
+        function handleCellClick(x, y) {
+            if (!isPlayerTurn) return;
+
+            // === ЛОГІКА РЕЖИМУ НАЙМУ ===
+            if (buyMode) {
+                if (isSpawnPointAllowed(x, y, 'player')) {
+                    const isOccupied = units.concat(enemies).some(u => u.x === x && u.y === y && u.hp > 0);
+                    if (isOccupied) {
+                        logElement.innerText = "⚠️ Ця позиція зайнята іншим загоном!";
+                        return;
+                    }
+
+                    if (buyMode === 'INF') {
+                        playerGold -= 1;
+                        units.push({ id: 'p_' + nextPlayerId++, type: 'player', classType: 'inf', name: 'INF', x: x, y: y, mp: 0, maxMp: 2, hp: 10, maxHp: 10, damage: 4 });
+                        logElement.innerText = `🏭 Натреновано Піхоту на координатах [${x}, ${y}]!`;
+                    } else if (buyMode === 'STM') {
+                        playerGold -= 2;
+                        units.push({ id: 'p_' + nextPlayerId++, type: 'player', classType: 'stm', name: 'STM', x: x, y: y, mp: 0, maxMp: 2, hp: 14, maxHp: 14, damage: 6 });
+                        logElement.innerText = `⚡ Штурмовий загін розгорнуто на [${x}, ${y}]!`;
+                    }
+
+                    buyMode = null;
+                    updateVisuals();
+                } else {
+                    logElement.innerText = "❌ Ви можете наймати юнітів лише у своїх селищах або на стартовій базі [0,0]!";
+                    buyMode = null;
+                    updateVisuals();
+                }
+                return;
+            }
+
+            // === СТАНДАРТНА ЛОГІКА ХОДУ ===
+            const clickedFriendly = units.find(u => u.x === x && u.y === y && u.hp > 0);
+            if (clickedFriendly) {
+                selectedUnit = (selectedUnit && selectedUnit.id === clickedFriendly.id) ? null : clickedFriendly;
+                updateVisuals();
+                return;
+            }
+
+            if (selectedUnit) {
+                const targetEnemy = enemies.find(e => e.x === x && e.y === y && e.hp > 0);
+
+                if (targetEnemy) {
+                    const dist = Math.abs(x - selectedUnit.x) + Math.abs(y - selectedUnit.y);
+                    if (dist === 1 && selectedUnit.mp > 0) {
+                        attackPlayer(selectedUnit, targetEnemy);
+                    }
+                    return;
+                }
+
+                if (selectedUnit.mp > 0) {
+                    const distance = Math.abs(x - selectedUnit.x) + Math.abs(y - selectedUnit.y);
+                    if (distance <= selectedUnit.mp) {
+                        selectedUnit.x = x;
+                        selectedUnit.y = y;
+                        selectedUnit.mp -= distance;
+
+                        const standingVillage = villages.find(v => v.x === x && v.y === y);
+                        if (standingVillage && standingVillage.owner !== 'player') {
+                            standingVillage.owner = 'player';
+                            logElement.innerText = `🚩 Селище захоплено на [${x}, ${y}]!`;
+                        } else {
+                            logElement.innerText = `👣 Війська перейшли на [${x}, ${y}].`;
+                        }
+
+                        selectedUnit = null;
+                        updateVisuals();
+                    }
+                }
+            }
+        }
+
+        function attackPlayer(attacker, defender) {
+            defender.hp -= attacker.damage;
+            if (defender.hp <= 0) defender.hp = 0;
+            logElement.innerText = `💥 ${attacker.name} завдав ${attacker.damage} шкоди ворогу ${defender.name}!`;
+            attacker.mp = 0;
+            selectedUnit = null;
+            updateVisuals();
+        }
+
+        // Активація вибору місця для спавну
+        buyInfBtn.addEventListener('click', () => { buyMode = 'INF'; logElement.innerText = "🫵 Оберіть власне селище або базу [0,0] для розміщення Піхоти."; updateVisuals(); });
+        buyStmBtn.addEventListener('click', () => { buyMode = 'STM'; logElement.innerText = "🫵 Оберіть власне селище або базу [0,0] для розміщення Штурмовика."; updateVisuals(); });
+
+        endTurnBtn.addEventListener('click', () => {
+            isPlayerTurn = false;
+            selectedUnit = null;
+            buyMode = null;
+            updateVisuals();
+            logElement.innerText = "🤖 Хід комп'ютера...";
+            setTimeout(executeEnemyAI, 800);
+        });
+
+        // === СИСТЕМА ШІ ===
+        function executeEnemyAI() {
+            let aiActionsLog = ["🤖 Дії ШІ:"];
+
+            const enemyVillagesCount = villages.filter(v => v.owner === 'enemy').length;
+            enemyGold += enemyVillagesCount;
+
+            // ШІ вирішує, кого купувати (якщо грошей багато, бере сильнішого штурмовика)
+            if (enemyGold >= 1) {
+                let pType = 'INF';
+                let cost = 1;
+                
+                if (enemyGold >= 2 && Math.random() > 0.4) {
+                    pType = 'STM';
+                    cost = 2;
+                }
+
+                // ШІ шукає всі свої точки спавну
+                let allowedSpawnPoints = [];
+                for(let y=0; y<MAP_SIZE; y++){
+                    for(let x=0; x<MAP_SIZE; x++){
+                        if (isSpawnPointAllowed(x, y, 'enemy')) {
+                            const isOccupied = units.concat(enemies).some(u => u.x === x && u.y === y && u.hp > 0);
+                            if (!isOccupied) allowedSpawnPoints.push({x, y});
+                        }
+                    }
+                }
+
+                // Спавнить там, де є місце
+                if (allowedSpawnPoints.length > 0) {
+                    // Стратегія ШІ: спавнити на точці, яка найближча до будь-якого юніта гравця
+                    allowedSpawnPoints.sort((a, b) => {
+                        let minDistA = 999, minDistB = 999;
+                        units.forEach(pu => {
+                            if(pu.hp > 0) {
+                                let dA = Math.abs(pu.x - a.x) + Math.abs(pu.y - a.y);
+                                let dB = Math.abs(pu.x - b.x) + Math.abs(pu.y - b.y);
+                                if(dA < minDistA) minDistA = dA;
+                                if(dB < minDistB) minDistB = dB;
+                            }
+                        });
+                        return minDistA - minDistB;
+                    });
+
+                    let bestSpawn = allowedSpawnPoints[0]; // найближча точка до фронту
+                    enemyGold -= cost;
+
+                    if (pType === 'INF') {
+                        enemies.push({ id: 'e_' + nextEnemyId++, type: 'enemy', classType: 'inf', name: 'E-INF', x: bestSpawn.x, y: bestSpawn.y, mp: 2, maxMp: 2, hp: 10, maxHp: 10, damage: 4 });
+                        aiActionsLog.push(`🏭 Найняв Піхоту на [${bestSpawn.x},${bestSpawn.y}].`);
+                    } else {
+                        enemies.push({ id: 'e_' + nextEnemyId++, type: 'enemy', classType: 'stm', name: 'E-STM', x: bestSpawn.x, y: bestSpawn.y, mp: 2, maxMp: 2, hp: 14, maxHp: 14, damage: 6 });
+                        aiActionsLog.push(`⚡ Розгорнув Штурмовика на [${bestSpawn.x},${bestSpawn.y}]!`);
+                    }
+                }
+            }
+
+            // Логіка переміщення військ ШІ
+            enemies.forEach(enemy => {
+                if (enemy.hp <= 0) return;
+                enemy.mp = enemy.maxMp;
+
+                let targets = [];
+                units.forEach(u => { if (u.hp > 0) targets.push({ x: u.x, y: u.y, type: 'player' }); });
+                villages.forEach(v => { if (v.owner !== 'enemy') targets.push({ x: v.x, y: v.y, type: 'village' }); });
+
+                if (targets.length === 0) return;
+
+                targets.sort((a, b) => {
+                    let distA = Math.abs(a.x - enemy.x) + Math.abs(a.y - enemy.y);
+                    let distB = Math.abs(b.x - enemy.x) + Math.abs(b.y - enemy.y);
+                    return distA - distB;
+                });
+
+                let bestTarget = targets[0];
+                
+                for (let step = 0; step < enemy.mp; step++) {
+                    let distanceToPlayer = Math.abs(bestTarget.x - enemy.x) + Math.abs(bestTarget.y - enemy.y);
+                    if (bestTarget.type === 'player' && distanceToPlayer === 1) {
+                        let playerUnit = units.find(u => u.x === bestTarget.x && u.y === bestTarget.y && u.hp > 0);
+                        if (playerUnit) {
+                            playerUnit.hp -= enemy.damage;
+                            if (playerUnit.hp <= 0) playerUnit.hp = 0;
+                            aiActionsLog.push(`💥 ${enemy.name} вдарив нашого солдата на -${enemy.damage} HP.`);
+                        }
+                        break;
+                    }
+
+                    let nextX = enemy.x;
+                    let nextY = enemy.y;
+
+                    if (enemy.x !== bestTarget.x) {
+                        nextX += (bestTarget.x > enemy.x) ? 1 : -1;
+                    } else if (enemy.y !== bestTarget.y) {
+                        nextY += (bestTarget.y > enemy.y) ? 1 : -1;
+                    }
+
+                    const isCellBlocked = units.concat(enemies).some(u => u.x === nextX && u.y === nextY && u.hp > 0);
+                    
+                    if (!isCellBlocked) {
+                        enemy.x = nextX;
+                        enemy.y = nextY;
+
+                        const standingVillage = villages.find(v => v.x === enemy.x && v.y === enemy.y);
+                        if (standingVillage && standingVillage.owner !== 'enemy') {
+                            standingVillage.owner = 'enemy';
+                            aiActionsLog.push(`🚩 ШІ віджав селище на [${enemy.x}, ${enemy.y}].`);
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            });
+
+            // Повернення ходу гравцю
+            const playerVillagesCount = villages.filter(v => v.owner === 'player').length;
+            playerGold += playerVillagesCount;
+            units.forEach(u => { if (u.hp > 0) u.mp = u.maxMp; });
+            isPlayerTurn = true;
+
+            aiActionsLog.push(`\n🔄 Твій хід! Надійшло +${playerVillagesCount} 💰.`);
+            logElement.innerText = aiActionsLog.join('\n');
+            updateVisuals();
+        }
+
+        createMap();
+    </script>
+</body>
+</html>
