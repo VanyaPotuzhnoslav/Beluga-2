@@ -171,12 +171,6 @@
         const buyStmBtn = document.getElementById('buy-stm-btn');
         const endTurnBtn = document.getElementById('end-turn-btn');
         const logElement = document.getElementById('log');
-        const TERRAIN_TYPES = {
-    PLAIN: { name: "Рівнина", moveCost: 1, rangeBonus: 0, damageMultiplier: 1.0 },
-    FOREST: { name: "Ліс", moveCost: 1, rangeBonus: 0, damageMultiplier: 0.7 }, // Укриття
-    MOUNTAIN: { name: "Гори", moveCost: 2, rangeBonus: 1, damageMultiplier: 1.0 }, // Потребує 2 швидкості, +1 дальність
-    TRENCH: { name: "Окопи", moveCost: 1, rangeBonus: 0, damageMultiplier: 0.6 }  // Гарне укриття
-};
 
         let playerGold = 2; // Дамо трохи більше на старт для тесту штурмовика
         let enemyGold = 2;
@@ -218,41 +212,6 @@
             }
             updateVisuals();
         }
-        function canMoveToTile(unit, targetTile) {
-    const terrain = TERRAIN_TYPES[targetTile.type] || TERRAIN_TYPES.PLAIN;
-    
-    // Перевіряємо, чи вистачає у юніта залишившихся очок руху (speed)
-    if (unit.currentSpeed >= terrain.moveCost) {
-        return true;
-    }
-    
-    return false;
-}
-
-function moveUnit(unit, targetTile) {
-    if (!canMoveToTile(unit, targetTile)) return false;
-    
-    const terrain = TERRAIN_TYPES[targetTile.type] || TERRAIN_TYPES.PLAIN;
-    
-    // Віднімаємо швидкість (наприклад, 2 для гір)
-    unit.currentSpeed -= terrain.moveCost;
-    unit.x = targetTile.x;
-    unit.y = targetTile.y;
-    
-    return true;
-}
-        function calculateDamage(attacker, defender, defenderTile) {
-    const terrain = TERRAIN_TYPES[defenderTile.type] || TERRAIN_TYPES.PLAIN;
-    
-    // Базовий розрахунок шкоди (можеш підставити свою формулу)
-    let finalDamage = attacker.attackPower;
-    
-    // Застосовуємо укриття (ліс зменшить на х0.7, окопи на х0.6)
-    finalDamage = finalDamage * terrain.damageMultiplier;
-    
-    // Округлюємо, щоб не було дробових життів
-    return Math.round(finalDamage);
-}
 
         // Перевірка, чи дозволено гравцеві/ШІ спавнити юніта на цій клітинці
         function isSpawnPointAllowed(x, y, faction) {
@@ -266,6 +225,39 @@ function moveUnit(unit, targetTile) {
 
             return false;
         }
+        // 1. ПЕРЕСУВАННЯ (Розрахунок вартості ходу в залежності від плитки призначення)
+function getMovementCost(targetTile) {
+    const terrain = TERRAIN_TYPES[targetTile.terrainType] || TERRAIN_TYPES.plain;
+    return terrain.moveCost;
+}
+
+// Приклад використання при ходьбі:
+// if (unit.movementPoints >= getMovementCost(targetTile)) { ... }
+
+
+// 2. ДАЛЬНІСТЬ (Розрахунок максимальної дальності з урахуванням позиції юніта)
+function getUnitAttackRange(unit, currentTile) {
+    const terrain = TERRAIN_TYPES[currentTile.terrainType] || TERRAIN_TYPES.plain;
+    // Базова дальність юніта + бонус від місцевості (наприклад, +1 в горах)
+    return unit.baseRange + terrain.rangeBonus;
+}
+
+
+// 3. БІЙ (Розрахунок укриття: зменшення шкоди, якщо ціль в окопах або лісі)
+function calculateDamage(attacker, defender, defenderTile) {
+    const terrain = TERRAIN_TYPES[defenderTile.terrainType] || TERRAIN_TYPES.plain;
+    
+    // Базова шкода (твоя стандартна формула)
+    let finalDamage = attacker.attackPower - defender.defensePower;
+    if (finalDamage < 1) finalDamage = 1; // Мінімальна шкода
+
+    // Застосовуємо укриття (якщо damageReduction = 0.3, то юніт отримує на 30% менше шкоди)
+    if (terrain.damageReduction > 0) {
+        finalDamage = finalDamage * (1 - terrain.damageReduction);
+    }
+
+    return Math.round(finalDamage);
+}
 
         function updateVisuals() {
             const cells = document.querySelectorAll('.cell');
@@ -405,6 +397,27 @@ function moveUnit(unit, targetTile) {
                     }
                     return;
                 }
+                // Попереднє завантаження текстур (робиться один раз при старті гри)
+const terrainImages = {};
+Object.keys(TERRAIN_TYPES).forEach(key => {
+    const img = new Image();
+    img.src = TERRAIN_TYPES[key].image;
+    terrainImages[key] = img;
+});
+
+// Функція малювання плитки (Tile)
+function drawTile(ctx, tile, x, y, size) {
+    const img = terrainImages[tile.terrainType];
+    
+    if (img && img.complete) {
+        // Малюємо гарну картинку з папки Terrain
+        ctx.drawImage(img, x, y, size, size);
+    } else {
+        // Фолбек (запасний варіант), якщо картинка ще не завантажилась
+        ctx.fillStyle = tile.terrainType === 'mountain' ? '#808080' : '#4CAF50';
+        ctx.fillRect(x, y, size, size);
+    }
+}
 
                 if (selectedUnit.mp > 0) {
                     const distance = Math.abs(x - selectedUnit.x) + Math.abs(y - selectedUnit.y);
@@ -563,6 +576,36 @@ function moveUnit(unit, targetTile) {
                     }
                 }
             });
+            const TERRAIN_TYPES = {
+    plain: {
+        name: "Рівнина",
+        moveCost: 1,
+        rangeBonus: 0,
+        damageReduction: 0, // Немає укриття
+        image: "Terrain/plain.png"
+    },
+    forest: {
+        name: "Ліс",
+        moveCost: 1,
+        rangeBonus: 0,
+        damageReduction: 0.3, // Укриття: -30% шкоди
+        image: "Terrain/forest.png"
+    },
+    mountain: {
+        name: "Гори",
+        moveCost: 2, // Потребує 2 швидкості
+        rangeBonus: 1, // Дає +1 до дальності
+        damageReduction: 0.1, // Легкий бонус захисту за висоту (можна змінити)
+        image: "Terrain/mountain.png"
+    },
+    trench: {
+        name: "Окопи",
+        moveCost: 1,
+        rangeBonus: 0,
+        damageReduction: 0.5, // Потужне укриття: -50% шкоди
+        image: "Terrain/trench.png"
+    }
+};
 
             // Повернення ходу гравцю
             const playerVillagesCount = villages.filter(v => v.owner === 'player').length;
